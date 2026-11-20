@@ -380,15 +380,39 @@ export function FinanceProvider({ children }) {
     return true;
   }
 
-  // Menandai target tabungan selesai (uang sudah terpakai untuk tujuan, tidak kembali ke dompet)
+  // Menandai target selesai & otomatis mencatatnya sebagai transaksi pengeluaran (tanpa memotong saldo dompet lagi)
   function completeGoal(id) {
     const targetId = String(id);
+    const goal = data.goals.find((g) => String(g.id) === targetId);
+
+    if (!goal || goal.completed) return;
+
+    const spentAmount = Number(goal.saved) || 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    // Pastikan tanggal transaksi masuk ke bulan aktif agar muncul di laporan bulan berjalan
+    const txDate = todayStr.startsWith(data.activeMonth)
+      ? todayStr
+      : `${data.activeMonth}-01`;
+
+    const goalExpenseTx = {
+      id: `tx-goal-${Date.now()}`,
+      type: "expense",
+      amount: spentAmount,
+      title: `Target Tercapai: ${goal.name}`,
+      category: "Belanja",
+      walletId: String(goal.walletId),
+      date: txDate,
+    };
 
     setData((prev) => ({
       ...prev,
       goals: prev.goals.map((g) =>
         String(g.id) === targetId ? { ...g, completed: true } : g,
       ),
+      transactions:
+        spentAmount > 0
+          ? [goalExpenseTx, ...prev.transactions]
+          : prev.transactions,
     }));
   }
 

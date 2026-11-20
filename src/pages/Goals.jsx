@@ -257,7 +257,7 @@ export default function Goals() {
                     onClick={() => {
                       f.completeGoal(g.id);
                       setNotice(
-                        `Selamat! Target "${g.name}" selesai. Dana tidak akan dikembalikan ke dompet saat kartu dihapus.`,
+                        `Selamat! Target "${g.name}" selesai & otomatis dicatat sebagai pengeluaran bulan ini.`,
                       );
                     }}
                   >
