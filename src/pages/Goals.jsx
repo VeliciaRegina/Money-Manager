@@ -1,5 +1,4 @@
 import { useState } from "react";
-
 import {
   Plus,
   Target,
@@ -8,13 +7,9 @@ import {
   ShieldCheck,
   CheckCircle2,
 } from "lucide-react";
-
 import { useFinance } from "../context/FinanceContext";
-
 import { money } from "../utils/finance";
-
 import { expenseCategories } from "../data/initialData";
-
 import ProgressBar from "../components/ProgressBar";
 
 export default function Goals() {
@@ -28,24 +23,18 @@ export default function Goals() {
   });
 
   const [contributions, setContributions] = useState({});
-
   const [total, setTotal] = useState(f.budgets.total);
-
   const [category, setCategory] = useState(expenseCategories[0]);
-
   const [limit, setLimit] = useState(
     f.budgets.categories[expenseCategories[0]] || "",
   );
-
   const [notice, setNotice] = useState("");
 
   function createGoal(e) {
     e.preventDefault();
-
     if (!goal.name.trim() || Number(goal.target) <= 0) return;
 
     f.addGoal(goal);
-
     setGoal({
       ...goal,
       name: "",
@@ -55,11 +44,8 @@ export default function Goals() {
 
   function saveBudget(e) {
     e.preventDefault();
-
     f.setBudget(total, null, 0);
-
     f.setBudget(null, category, limit);
-
     setNotice("Pengaturan budget berhasil disimpan.");
   }
 
@@ -84,11 +70,9 @@ export default function Goals() {
     <div className="page-stack">
       <div className="page-intro">
         <span className="eyebrow">PLAN WITH PURPOSE</span>
-
         <h1>
           Budget & <em>goals.</em>
         </h1>
-
         <p>
           Buat batas pengeluaran dan wujudkan hal yang sedang kamu usahakan.
         </p>
@@ -99,17 +83,14 @@ export default function Goals() {
         <div className="panel-heading">
           <div>
             <span className="eyebrow">ANTI-BONCOS SETUP</span>
-
             <h3>Atur batas pengeluaran</h3>
           </div>
-
           <ShieldCheck className="heading-icon" />
         </div>
 
         <form className="budget-settings" onSubmit={saveBudget}>
           <label className="field">
             <span>Budget maksimal bulanan (Rp)</span>
-
             <input
               type="number"
               min="0"
@@ -121,12 +102,10 @@ export default function Goals() {
           <div className="budget-category-edit">
             <label className="field">
               <span>Kategori</span>
-
               <select
                 value={category}
                 onChange={(e) => {
                   setCategory(e.target.value);
-
                   setLimit(f.budgets.categories[e.target.value] || "");
                 }}
               >
@@ -138,7 +117,6 @@ export default function Goals() {
 
             <label className="field">
               <span>Limit kategori (Rp)</span>
-
               <input
                 type="number"
                 min="0"
@@ -170,12 +148,10 @@ export default function Goals() {
               <div className="limit-row" key={name}>
                 <div className="category-meta">
                   <b>{name}</b>
-
                   <span>
                     {money(spent)} / {money(value)}
                   </span>
                 </div>
-
                 <ProgressBar value={spent} max={value} />
               </div>
             );
@@ -187,10 +163,8 @@ export default function Goals() {
       <div className="section-heading">
         <div>
           <span className="eyebrow">DREAMS IN PROGRESS</span>
-
           <h2>Target tabungan</h2>
         </div>
-
         <span className="count-pill">{f.goals.length} target</span>
       </div>
 
@@ -226,7 +200,6 @@ export default function Goals() {
 
               <div className="goal-progress">
                 <strong>{money(g.saved)}</strong>
-
                 <span>{Math.round((g.saved / g.target) * 100)}%</span>
               </div>
 
@@ -308,17 +281,14 @@ export default function Goals() {
         <div className="panel-heading">
           <div>
             <span className="eyebrow">NEW WISHLIST</span>
-
             <h3>Buat target baru</h3>
           </div>
-
           <Plus className="heading-icon" />
         </div>
 
         <form className="goal-form" onSubmit={createGoal}>
           <label className="field">
             <span>Nama target</span>
-
             <input
               value={goal.name}
               onChange={(e) =>
@@ -334,7 +304,6 @@ export default function Goals() {
 
           <label className="field">
             <span>Nominal target (Rp)</span>
-
             <input
               type="number"
               min="1"
@@ -352,7 +321,6 @@ export default function Goals() {
 
           <label className="field">
             <span>Dompet sumber dana</span>
-
             <select
               value={goal.walletId}
               onChange={(e) =>
@@ -372,7 +340,6 @@ export default function Goals() {
 
           <label className="field">
             <span>Target tanggal (opsional)</span>
-
             <input
               type="date"
               value={goal.deadline}

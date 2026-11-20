@@ -17,7 +17,6 @@ export function FinanceProvider({ children }) {
     localStorage.setItem("fintrack_data", JSON.stringify(data));
   }, [data]);
 
-  // Transaksi yang hanya masuk pada bulan aktif
   const monthTransactions = data.transactions.filter(
     (t) => t.date && t.date.startsWith(data.activeMonth),
   );
@@ -57,7 +56,6 @@ export function FinanceProvider({ children }) {
     const wallet = data.wallets.find((w) => String(w.id) === targetWalletId);
     if (!wallet) return false;
 
-    // Validasi agar saldo dompet tidak minus saat pengeluaran
     if (tx.type === "expense" && Number(wallet.balance) < amount) {
       return false;
     }
@@ -85,7 +83,7 @@ export function FinanceProvider({ children }) {
     return true;
   }
 
-  // 4. Transfer Antar-Dompet
+  // 4. Transfer Antar-Dompet + Catat Riwayat Transfer
   function transfer(fromId, toId, amountValue) {
     const amount = Number(amountValue) || 0;
     const sourceId = String(fromId);
@@ -99,6 +97,23 @@ export function FinanceProvider({ children }) {
     if (!sourceWallet || !destWallet) return false;
     if (Number(sourceWallet.balance) < amount) return false;
 
+    const now = new Date();
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const txDate = localToday.startsWith(data.activeMonth)
+      ? localToday
+      : `${data.activeMonth}-01`;
+
+    const transferTx = {
+      id: `tx-tf-${Date.now()}`,
+      type: "transfer",
+      amount,
+      title: `Transfer: ${sourceWallet.name} → ${destWallet.name}`,
+      category: "Transfer",
+      walletId: sourceId,
+      toWalletId: destId,
+      date: txDate,
+    };
+
     setData((prev) => ({
       ...prev,
       wallets: prev.wallets.map((w) => {
@@ -110,12 +125,13 @@ export function FinanceProvider({ children }) {
         }
         return w;
       }),
+      transactions: [transferTx, ...prev.transactions],
     }));
 
     return true;
   }
 
-  // 5. Tutup Buku / Reset Bulanan & Arsip ke History
+  // 5. Tutup Buku / Reset Bulanan
   function closeMonth() {
     const currentMonthTx = data.transactions.filter(
       (t) => t.date && t.date.startsWith(data.activeMonth),
@@ -129,7 +145,6 @@ export function FinanceProvider({ children }) {
       .filter((t) => t.type === "expense")
       .reduce((sum, t) => sum + Number(t.amount), 0);
 
-    // Hitung kategori pengeluaran terbesar
     const categoryTotals = {};
     currentMonthTx
       .filter((t) => t.type === "expense")
@@ -147,7 +162,6 @@ export function FinanceProvider({ children }) {
       }
     });
 
-    // Hitung bulan berikutnya (YYYY-MM)
     const [yearStr, monthStr] = data.activeMonth.split("-");
     let year = Number(yearStr);
     let month = Number(monthStr) + 1;
