@@ -1,378 +1,247 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-
+import { createContext, useContext, useEffect, useState } from "react";
 import { initialData } from "../data/initialData";
-import { monthKey } from "../utils/finance";
 
-const FinanceContext = createContext(null);
-
-const STORAGE_KEY = "fintrack-finance-v1";
-
-// Membaca data dari localStorage dan memastikan semua id dompet bertipe string
-function loadData() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const parsed = saved
-      ? { ...initialData, ...JSON.parse(saved) }
-      : initialData;
-
-    return {
-      ...parsed,
-      wallets: (parsed.wallets || []).map((w) => ({
-        ...w,
-        id: String(w.id),
-        balance: Number(w.balance) || 0,
-      })),
-    };
-  } catch {
-    return initialData;
-  }
-}
+const FinanceContext = createContext();
 
 export function FinanceProvider({ children }) {
-  const [data, setData] = useState(loadData);
+  const [data, setData] = useState(() => {
+    try {
+      const saved = localStorage.getItem("fintrack_data");
+      return saved ? JSON.parse(saved) : initialData;
+    } catch {
+      return initialData;
+    }
+  });
 
-  // Menyimpan perubahan data ke localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem("fintrack_data", JSON.stringify(data));
   }, [data]);
 
-  const currentMonth = monthKey(new Date().toISOString().slice(0, 10));
+  // Transaksi yang hanya masuk pada bulan aktif
+  const monthTransactions = data.transactions.filter(
+    (t) => t.date && t.date.startsWith(data.activeMonth),
+  );
 
-  // Otomatis mengarsipkan bulan lama HANYA jika bulan kalender maju melewati activeMonth
-  useEffect(() => {
-    setData((prev) => {
-      if (!prev.activeMonth || prev.activeMonth >= currentMonth) return prev;
-
-      const entries = prev.transactions.filter(
-        (t) => t.month === prev.activeMonth,
-      );
-
-      const alreadyArchived = prev.history.some(
-        (h) => h.month === prev.activeMonth,
-      );
-
-      let history = prev.history;
-
-      if (entries.length && !alreadyArchived) {
-        const expenses = entries.filter((t) => t.type === "expense");
-        const incomes = entries.filter((t) => t.type === "income");
-
-        const categoryTotals = expenses.reduce((acc, t) => {
-          acc[t.category] = (acc[t.category] || 0) + t.amount;
-          return acc;
-        }, {});
-
-        const topCategory = Object.entries(categoryTotals).sort(
-          (a, b) => b[1] - a[1],
-        )[0];
-
-        const income = incomes.reduce((total, t) => total + t.amount, 0);
-        const expense = expenses.reduce((total, t) => total + t.amount, 0);
-
-        history = [
-          {
-            month: prev.activeMonth,
-            income,
-            expense,
-            net: income - expense,
-            topCategory: topCategory
-              ? {
-                  name: topCategory[0],
-                  amount: topCategory[1],
-                }
-              : null,
-            transactions: entries,
-          },
-          ...prev.history,
-        ];
-      }
-
-      return {
-        ...prev,
-        activeMonth: currentMonth,
-        history,
-      };
-    });
-  }, [currentMonth]);
-
-  // Transaksi khusus bulan aktif
-  const monthTransactions = useMemo(() => {
-    return data.transactions.filter((t) => t.month === data.activeMonth);
-  }, [data.transactions, data.activeMonth]);
-
-  // Menambahkan dompet
+  // 1. Tambah Dompet
   function addWallet(wallet) {
+    const newWallet = {
+      id: `w-${Date.now()}`,
+      name: wallet.name.trim(),
+      type: wallet.type || "cash",
+      balance: Number(wallet.balance) || 0,
+      color: wallet.color || "yellow",
+    };
+
     setData((prev) => ({
       ...prev,
-      wallets: [
-        ...prev.wallets,
-        {
-          ...wallet,
-          id: String(crypto.randomUUID()),
-          balance: Number(wallet.balance) || 0,
-        },
-      ],
+      wallets: [...prev.wallets, newWallet],
     }));
   }
 
-  // Menghapus dompet
+  // 2. Hapus Dompet
   function deleteWallet(id) {
     const targetId = String(id);
-    const used =
-      data.transactions.some((t) => String(t.walletId) === targetId) ||
-      data.goals.some((g) => String(g.walletId) === targetId);
-
-    if (used) {
-      return {
-        ok: false,
-        message: "Dompet masih digunakan oleh transaksi atau target tabungan.",
-      };
-    }
-
     setData((prev) => ({
       ...prev,
       wallets: prev.wallets.filter((w) => String(w.id) !== targetId),
     }));
-
-    return { ok: true };
   }
 
-  // Menambahkan transaksi pemasukan atau pengeluaran
-  function addTransaction(form) {
-    const amount = Number(form.amount);
-    const targetWalletId = String(form.walletId);
+  // 3. Tambah Transaksi (Pemasukan / Pengeluaran)
+  function addTransaction(tx) {
+    const amount = Number(tx.amount) || 0;
+    const targetWalletId = String(tx.walletId);
 
-    if (!amount || amount <= 0) {
-      return { ok: false, message: "Nominal transaksi harus lebih dari 0." };
-    }
+    if (amount <= 0) return false;
 
     const wallet = data.wallets.find((w) => String(w.id) === targetWalletId);
+    if (!wallet) return false;
 
-    if (!wallet) {
-      return { ok: false, message: "Dompet tidak ditemukan." };
+    // Validasi agar saldo dompet tidak minus saat pengeluaran
+    if (tx.type === "expense" && Number(wallet.balance) < amount) {
+      return false;
     }
 
-    if (form.type === "expense" && wallet.balance < amount) {
-      return {
-        ok: false,
-        message: `Saldo ${wallet.name} tidak cukup (tersisa Rp ${wallet.balance.toLocaleString("id-ID")}).`,
-      };
-    }
+    const newTx = {
+      id: `tx-${Date.now()}`,
+      type: tx.type,
+      amount,
+      title: tx.title.trim(),
+      category: tx.category,
+      walletId: targetWalletId,
+      date: tx.date || `${data.activeMonth}-01`,
+    };
 
     setData((prev) => ({
       ...prev,
-
-      wallets: prev.wallets.map((w) =>
-        String(w.id) === targetWalletId
-          ? {
-              ...w,
-              balance: w.balance + (form.type === "income" ? amount : -amount),
-            }
-          : w,
-      ),
-
-      transactions: [
-        {
-          ...form,
-          walletId: targetWalletId,
-          amount,
-          id: String(crypto.randomUUID()),
-          month: monthKey(form.date),
-        },
-        ...prev.transactions,
-      ],
+      wallets: prev.wallets.map((w) => {
+        if (String(w.id) !== targetWalletId) return w;
+        const delta = tx.type === "income" ? amount : -amount;
+        return { ...w, balance: Number(w.balance) + delta };
+      }),
+      transactions: [newTx, ...prev.transactions],
     }));
 
-    return { ok: true };
+    return true;
   }
 
-  // Transfer antar dompet
-  function transfer(fromId, toId, amount, note = "Transfer antar dompet") {
-    const nominal = Number(amount);
+  // 4. Transfer Antar-Dompet
+  function transfer(fromId, toId, amountValue) {
+    const amount = Number(amountValue) || 0;
     const sourceId = String(fromId);
     const destId = String(toId);
 
-    if (!nominal || nominal <= 0 || sourceId === destId) return false;
+    if (amount <= 0 || sourceId === destId) return false;
 
-    const from = data.wallets.find((w) => String(w.id) === sourceId);
-    const to = data.wallets.find((w) => String(w.id) === destId);
+    const sourceWallet = data.wallets.find((w) => String(w.id) === sourceId);
+    const destWallet = data.wallets.find((w) => String(w.id) === destId);
 
-    if (!from || !to || from.balance < nominal) {
-      return false;
-    }
-
-    const transferId = String(crypto.randomUUID());
-    const date = `${data.activeMonth}-01`;
+    if (!sourceWallet || !destWallet) return false;
+    if (Number(sourceWallet.balance) < amount) return false;
 
     setData((prev) => ({
       ...prev,
-
       wallets: prev.wallets.map((w) => {
-        const wId = String(w.id);
-        if (wId === sourceId) {
-          return { ...w, balance: Number(w.balance) - nominal };
+        if (String(w.id) === sourceId) {
+          return { ...w, balance: Number(w.balance) - amount };
         }
-        if (wId === destId) {
-          return { ...w, balance: Number(w.balance) + nominal };
+        if (String(w.id) === destId) {
+          return { ...w, balance: Number(w.balance) + amount };
         }
         return w;
       }),
-
-      transactions: [
-        {
-          id: String(crypto.randomUUID()),
-          transferId,
-          title: note,
-          amount: nominal,
-          type: "transfer-out",
-          category: "Transfer",
-          walletId: sourceId,
-          date,
-          month: prev.activeMonth,
-        },
-        {
-          id: String(crypto.randomUUID()),
-          transferId,
-          title: note,
-          amount: nominal,
-          type: "transfer-in",
-          category: "Transfer",
-          walletId: destId,
-          date,
-          month: prev.activeMonth,
-        },
-        ...prev.transactions,
-      ],
     }));
 
     return true;
   }
 
-  // Menutup buku dan mengarsipkan bulan aktif
+  // 5. Tutup Buku / Reset Bulanan & Arsip ke History
   function closeMonth() {
-    const entries = data.transactions.filter(
-      (t) => t.month === data.activeMonth,
+    const currentMonthTx = data.transactions.filter(
+      (t) => t.date && t.date.startsWith(data.activeMonth),
     );
 
-    if (!entries.length) return false;
+    const income = currentMonthTx
+      .filter((t) => t.type === "income")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
 
-    if (data.history.some((h) => h.month === data.activeMonth)) {
-      return false;
+    const expense = currentMonthTx
+      .filter((t) => t.type === "expense")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+
+    // Hitung kategori pengeluaran terbesar
+    const categoryTotals = {};
+    currentMonthTx
+      .filter((t) => t.type === "expense")
+      .forEach((t) => {
+        categoryTotals[t.category] =
+          (categoryTotals[t.category] || 0) + Number(t.amount);
+      });
+
+    let topCategory = "-";
+    let maxSpent = 0;
+    Object.entries(categoryTotals).forEach(([cat, val]) => {
+      if (val > maxSpent) {
+        maxSpent = val;
+        topCategory = cat;
+      }
+    });
+
+    // Hitung bulan berikutnya (YYYY-MM)
+    const [yearStr, monthStr] = data.activeMonth.split("-");
+    let year = Number(yearStr);
+    let month = Number(monthStr) + 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
     }
+    const nextMonth = `${year}-${String(month).padStart(2, "0")}`;
 
-    const expenses = entries.filter((t) => t.type === "expense");
-    const incomes = entries.filter((t) => t.type === "income");
-
-    const categoryTotals = expenses.reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + t.amount;
-      return acc;
-    }, {});
-
-    const topCategory = Object.entries(categoryTotals).sort(
-      (a, b) => b[1] - a[1],
-    )[0];
-
-    const income = incomes.reduce((s, t) => s + t.amount, 0);
-    const expense = expenses.reduce((s, t) => s + t.amount, 0);
-
-    const [year, month] = data.activeMonth.split("-").map(Number);
-    const next = new Date(year, month, 1);
-    const nextKey = `${next.getFullYear()}-${String(
-      next.getMonth() + 1,
-    ).padStart(2, "0")}`;
+    const archiveEntry = {
+      id: `hist-${Date.now()}`,
+      month: data.activeMonth,
+      income,
+      expense,
+      net: income - expense,
+      topCategory,
+      transactions: currentMonthTx,
+    };
 
     setData((prev) => ({
       ...prev,
-      activeMonth: nextKey,
-
-      history: [
-        {
-          month: prev.activeMonth,
-          income,
-          expense,
-          net: income - expense,
-          topCategory: topCategory
-            ? {
-                name: topCategory[0],
-                amount: topCategory[1],
-              }
-            : null,
-          transactions: entries,
-        },
-        ...prev.history,
-      ],
+      activeMonth: nextMonth,
+      history: [archiveEntry, ...(prev.history || [])],
     }));
-
-    return true;
   }
 
-  // Mengatur budget
-  function setBudget(total, category, amount) {
-    setData((prev) => ({
-      ...prev,
-
-      budgets: {
+  // 6. Atur Budget Bulanan & Per Kategori
+  function setBudget(totalLimit, categoryName, categoryLimit) {
+    setData((prev) => {
+      const updatedBudgets = {
         ...prev.budgets,
-        total: total === null ? prev.budgets.total : Number(total),
-        categories: category
-          ? {
-              ...prev.budgets.categories,
-              [category]: Number(amount),
-            }
-          : prev.budgets.categories,
-      },
-    }));
+        categories: { ...prev.budgets.categories },
+      };
+
+      if (totalLimit !== null && totalLimit !== undefined) {
+        updatedBudgets.total = Number(totalLimit) || 0;
+      }
+
+      if (categoryName) {
+        updatedBudgets.categories[categoryName] = Number(categoryLimit) || 0;
+      }
+
+      return {
+        ...prev,
+        budgets: updatedBudgets,
+      };
+    });
   }
 
-  // Membuat target tabungan
+  // 7. Tambah Target Tabungan (Goal)
   function addGoal(goal) {
+    const newGoal = {
+      id: `g-${Date.now()}`,
+      name: goal.name.trim(),
+      target: Number(goal.target) || 0,
+      saved: 0,
+      walletId: String(goal.walletId),
+      deadline: goal.deadline || "",
+      completed: false,
+    };
+
     setData((prev) => ({
       ...prev,
-
-      goals: [
-        ...prev.goals,
-        {
-          ...goal,
-          id: String(crypto.randomUUID()),
-          walletId: String(goal.walletId),
-          target: Number(goal.target),
-          saved: 0,
-        },
-      ],
+      goals: [...prev.goals, newGoal],
     }));
   }
 
-  // Mengalokasikan uang ke target tabungan
-  function contributeGoal(goalId, amount) {
-    const nominal = Number(amount);
+  // 8. Alokasikan Dana dari Dompet ke Target Tabungan
+  function contributeGoal(id, amountValue) {
+    const targetId = String(id);
+    const amount = Number(amountValue) || 0;
 
-    const goal = data.goals.find((g) => String(g.id) === String(goalId));
-    const wallet = data.wallets.find(
-      (w) => String(w.id) === String(goal?.walletId),
-    );
+    if (amount <= 0) return false;
 
-    if (
-      !goal ||
-      !wallet ||
-      nominal <= 0 ||
-      wallet.balance < nominal ||
-      goal.saved + nominal > goal.target
-    ) {
-      return false;
-    }
+    const goal = data.goals.find((g) => String(g.id) === targetId);
+    if (!goal || goal.completed) return false;
+
+    const remaining = Number(goal.target) - Number(goal.saved);
+    if (amount > remaining) return false;
+
+    const sourceWalletId = String(goal.walletId);
+    const wallet = data.wallets.find((w) => String(w.id) === sourceWalletId);
+    if (!wallet || Number(wallet.balance) < amount) return false;
 
     setData((prev) => ({
       ...prev,
-
       wallets: prev.wallets.map((w) =>
-        String(w.id) === String(wallet.id)
-          ? { ...w, balance: w.balance - nominal }
+        String(w.id) === sourceWalletId
+          ? { ...w, balance: Number(w.balance) - amount }
           : w,
       ),
-
       goals: prev.goals.map((g) =>
-        String(g.id) === String(goalId)
-          ? { ...g, saved: g.saved + nominal }
+        String(g.id) === targetId
+          ? { ...g, saved: Number(g.saved) + amount }
           : g,
       ),
     }));
@@ -380,7 +249,7 @@ export function FinanceProvider({ children }) {
     return true;
   }
 
-  // Menandai target selesai & otomatis mencatatnya sebagai transaksi pengeluaran (tanpa memotong saldo dompet lagi)
+  // 9. Selesaikan Target Tabungan & Catat Otomatis Sebagai Pengeluaran Bulan Aktif
   function completeGoal(id) {
     const targetId = String(id);
     const goal = data.goals.find((g) => String(g.id) === targetId);
@@ -388,10 +257,11 @@ export function FinanceProvider({ children }) {
     if (!goal || goal.completed) return;
 
     const spentAmount = Number(goal.saved) || 0;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    // Pastikan tanggal transaksi masuk ke bulan aktif agar muncul di laporan bulan berjalan
-    const txDate = todayStr.startsWith(data.activeMonth)
-      ? todayStr
+    const now = new Date();
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    const txDate = localToday.startsWith(data.activeMonth)
+      ? localToday
       : `${data.activeMonth}-01`;
 
     const goalExpenseTx = {
@@ -416,7 +286,7 @@ export function FinanceProvider({ children }) {
     }));
   }
 
-  // Menghapus target: jika belum diklik Complete, kembalikan tabungan ke dompet asal
+  // 10. Hapus Target Tabungan (Kembalikan Saldo Jika Belum Complete)
   function removeGoal(id) {
     const targetId = String(id);
     const goal = data.goals.find((g) => String(g.id) === targetId);
@@ -428,7 +298,6 @@ export function FinanceProvider({ children }) {
 
     setData((prev) => ({
       ...prev,
-
       wallets:
         refundAmount > 0
           ? prev.wallets.map((w) =>
@@ -437,7 +306,6 @@ export function FinanceProvider({ children }) {
                 : w,
             )
           : prev.wallets,
-
       goals: prev.goals.filter((g) => String(g.id) !== targetId),
     }));
   }
@@ -462,4 +330,6 @@ export function FinanceProvider({ children }) {
   );
 }
 
-export const useFinance = () => useContext(FinanceContext);
+export function useFinance() {
+  return useContext(FinanceContext);
+}
