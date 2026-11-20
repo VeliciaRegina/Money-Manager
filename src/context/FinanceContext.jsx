@@ -7,12 +7,22 @@ const FinanceContext = createContext(null);
 
 const STORAGE_KEY = "fintrack-finance-v1";
 
-// Membaca data dari localStorage
+// Membaca data dari localStorage dan memastikan semua id dompet bertipe string
 function loadData() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
+    const parsed = saved
+      ? { ...initialData, ...JSON.parse(saved) }
+      : initialData;
 
-    return saved ? { ...initialData, ...JSON.parse(saved) } : initialData;
+    return {
+      ...parsed,
+      wallets: (parsed.wallets || []).map((w) => ({
+        ...w,
+        id: String(w.id),
+        balance: Number(w.balance) || 0,
+      })),
+    };
   } catch {
     return initialData;
   }
@@ -28,10 +38,10 @@ export function FinanceProvider({ children }) {
 
   const currentMonth = monthKey(new Date().toISOString().slice(0, 10));
 
-  // Otomatis mengarsipkan bulan lama ketika bulan kalender berubah
+  // Otomatis mengarsipkan bulan lama HANYA jika bulan kalender maju melewati activeMonth
   useEffect(() => {
     setData((prev) => {
-      if (prev.activeMonth === currentMonth) return prev;
+      if (!prev.activeMonth || prev.activeMonth >= currentMonth) return prev;
 
       const entries = prev.transactions.filter(
         (t) => t.month === prev.activeMonth,
@@ -45,7 +55,6 @@ export function FinanceProvider({ children }) {
 
       if (entries.length && !alreadyArchived) {
         const expenses = entries.filter((t) => t.type === "expense");
-
         const incomes = entries.filter((t) => t.type === "income");
 
         const categoryTotals = expenses.reduce((acc, t) => {
@@ -58,7 +67,6 @@ export function FinanceProvider({ children }) {
         )[0];
 
         const income = incomes.reduce((total, t) => total + t.amount, 0);
-
         const expense = expenses.reduce((total, t) => total + t.amount, 0);
 
         history = [
@@ -100,7 +108,7 @@ export function FinanceProvider({ children }) {
         ...prev.wallets,
         {
           ...wallet,
-          id: crypto.randomUUID(),
+          id: String(crypto.randomUUID()),
           balance: Number(wallet.balance) || 0,
         },
       ],
@@ -109,9 +117,10 @@ export function FinanceProvider({ children }) {
 
   // Menghapus dompet
   function deleteWallet(id) {
+    const targetId = String(id);
     const used =
-      data.transactions.some((t) => t.walletId === id) ||
-      data.goals.some((g) => g.walletId === id);
+      data.transactions.some((t) => String(t.walletId) === targetId) ||
+      data.goals.some((g) => String(g.walletId) === targetId);
 
     if (used) {
       return {
@@ -122,7 +131,7 @@ export function FinanceProvider({ children }) {
 
     setData((prev) => ({
       ...prev,
-      wallets: prev.wallets.filter((w) => w.id !== id),
+      wallets: prev.wallets.filter((w) => String(w.id) !== targetId),
     }));
 
     return { ok: true };
@@ -131,14 +140,30 @@ export function FinanceProvider({ children }) {
   // Menambahkan transaksi pemasukan atau pengeluaran
   function addTransaction(form) {
     const amount = Number(form.amount);
+    const targetWalletId = String(form.walletId);
 
-    if (!amount || amount <= 0) return false;
+    if (!amount || amount <= 0) {
+      return { ok: false, message: "Nominal transaksi harus lebih dari 0." };
+    }
+
+    const wallet = data.wallets.find((w) => String(w.id) === targetWalletId);
+
+    if (!wallet) {
+      return { ok: false, message: "Dompet tidak ditemukan." };
+    }
+
+    if (form.type === "expense" && wallet.balance < amount) {
+      return {
+        ok: false,
+        message: `Saldo ${wallet.name} tidak cukup (tersisa Rp ${wallet.balance.toLocaleString("id-ID")}).`,
+      };
+    }
 
     setData((prev) => ({
       ...prev,
 
       wallets: prev.wallets.map((w) =>
-        w.id === form.walletId
+        String(w.id) === targetWalletId
           ? {
               ...w,
               balance: w.balance + (form.type === "income" ? amount : -amount),
@@ -149,64 +174,70 @@ export function FinanceProvider({ children }) {
       transactions: [
         {
           ...form,
+          walletId: targetWalletId,
           amount,
-          id: crypto.randomUUID(),
+          id: String(crypto.randomUUID()),
           month: monthKey(form.date),
         },
         ...prev.transactions,
       ],
     }));
 
-    return true;
+    return { ok: true };
   }
 
   // Transfer antar dompet
   function transfer(fromId, toId, amount, note = "Transfer antar dompet") {
-    amount = Number(amount);
+    const nominal = Number(amount);
+    const sourceId = String(fromId);
+    const destId = String(toId);
 
-    if (!amount || amount <= 0 || fromId === toId) return false;
+    if (!nominal || nominal <= 0 || sourceId === destId) return false;
 
-    const from = data.wallets.find((w) => w.id === fromId);
-    const to = data.wallets.find((w) => w.id === toId);
+    const from = data.wallets.find((w) => String(w.id) === sourceId);
+    const to = data.wallets.find((w) => String(w.id) === destId);
 
-    if (!from || !to || from.balance < amount) {
+    if (!from || !to || from.balance < nominal) {
       return false;
     }
 
-    const transferId = crypto.randomUUID();
-    const date = new Date().toISOString().slice(0, 10);
+    const transferId = String(crypto.randomUUID());
+    const date = `${data.activeMonth}-01`;
 
     setData((prev) => ({
       ...prev,
 
-      wallets: prev.wallets.map((w) =>
-        w.id === fromId
-          ? { ...w, balance: w.balance - amount }
-          : w.id === toId
-            ? { ...w, balance: w.balance + amount }
-            : w,
-      ),
+      wallets: prev.wallets.map((w) => {
+        const wId = String(w.id);
+        if (wId === sourceId) {
+          return { ...w, balance: Number(w.balance) - nominal };
+        }
+        if (wId === destId) {
+          return { ...w, balance: Number(w.balance) + nominal };
+        }
+        return w;
+      }),
 
       transactions: [
         {
-          id: crypto.randomUUID(),
+          id: String(crypto.randomUUID()),
           transferId,
           title: note,
-          amount,
+          amount: nominal,
           type: "transfer-out",
           category: "Transfer",
-          walletId: fromId,
+          walletId: sourceId,
           date,
           month: prev.activeMonth,
         },
         {
-          id: crypto.randomUUID(),
+          id: String(crypto.randomUUID()),
           transferId,
           title: note,
-          amount,
+          amount: nominal,
           type: "transfer-in",
           category: "Transfer",
-          walletId: toId,
+          walletId: destId,
           date,
           month: prev.activeMonth,
         },
@@ -230,7 +261,6 @@ export function FinanceProvider({ children }) {
     }
 
     const expenses = entries.filter((t) => t.type === "expense");
-
     const incomes = entries.filter((t) => t.type === "income");
 
     const categoryTotals = expenses.reduce((acc, t) => {
@@ -243,13 +273,10 @@ export function FinanceProvider({ children }) {
     )[0];
 
     const income = incomes.reduce((s, t) => s + t.amount, 0);
-
     const expense = expenses.reduce((s, t) => s + t.amount, 0);
 
     const [year, month] = data.activeMonth.split("-").map(Number);
-
     const next = new Date(year, month, 1);
-
     const nextKey = `${next.getFullYear()}-${String(
       next.getMonth() + 1,
     ).padStart(2, "0")}`;
@@ -264,14 +291,12 @@ export function FinanceProvider({ children }) {
           income,
           expense,
           net: income - expense,
-
           topCategory: topCategory
             ? {
                 name: topCategory[0],
                 amount: topCategory[1],
               }
             : null,
-
           transactions: entries,
         },
         ...prev.history,
@@ -288,9 +313,7 @@ export function FinanceProvider({ children }) {
 
       budgets: {
         ...prev.budgets,
-
         total: total === null ? prev.budgets.total : Number(total),
-
         categories: category
           ? {
               ...prev.budgets.categories,
@@ -310,7 +333,8 @@ export function FinanceProvider({ children }) {
         ...prev.goals,
         {
           ...goal,
-          id: crypto.randomUUID(),
+          id: String(crypto.randomUUID()),
+          walletId: String(goal.walletId),
           target: Number(goal.target),
           saved: 0,
         },
@@ -320,18 +344,19 @@ export function FinanceProvider({ children }) {
 
   // Mengalokasikan uang ke target tabungan
   function contributeGoal(goalId, amount) {
-    amount = Number(amount);
+    const nominal = Number(amount);
 
-    const goal = data.goals.find((g) => g.id === goalId);
-
-    const wallet = data.wallets.find((w) => w.id === goal?.walletId);
+    const goal = data.goals.find((g) => String(g.id) === String(goalId));
+    const wallet = data.wallets.find(
+      (w) => String(w.id) === String(goal?.walletId),
+    );
 
     if (
       !goal ||
       !wallet ||
-      amount <= 0 ||
-      wallet.balance < amount ||
-      goal.saved + amount > goal.target
+      nominal <= 0 ||
+      wallet.balance < nominal ||
+      goal.saved + nominal > goal.target
     ) {
       return false;
     }
@@ -340,22 +365,56 @@ export function FinanceProvider({ children }) {
       ...prev,
 
       wallets: prev.wallets.map((w) =>
-        w.id === wallet.id ? { ...w, balance: w.balance - amount } : w,
+        String(w.id) === String(wallet.id)
+          ? { ...w, balance: w.balance - nominal }
+          : w,
       ),
 
       goals: prev.goals.map((g) =>
-        g.id === goalId ? { ...g, saved: g.saved + amount } : g,
+        String(g.id) === String(goalId)
+          ? { ...g, saved: g.saved + nominal }
+          : g,
       ),
     }));
 
     return true;
   }
 
-  // Menghapus target
-  function removeGoal(id) {
+  // Menandai target tabungan selesai (uang sudah terpakai untuk tujuan, tidak kembali ke dompet)
+  function completeGoal(id) {
+    const targetId = String(id);
+
     setData((prev) => ({
       ...prev,
-      goals: prev.goals.filter((g) => g.id !== id),
+      goals: prev.goals.map((g) =>
+        String(g.id) === targetId ? { ...g, completed: true } : g,
+      ),
+    }));
+  }
+
+  // Menghapus target: jika belum diklik Complete, kembalikan tabungan ke dompet asal
+  function removeGoal(id) {
+    const targetId = String(id);
+    const goal = data.goals.find((g) => String(g.id) === targetId);
+
+    if (!goal) return;
+
+    const refundAmount = goal.completed ? 0 : Number(goal.saved) || 0;
+    const sourceWalletId = String(goal.walletId);
+
+    setData((prev) => ({
+      ...prev,
+
+      wallets:
+        refundAmount > 0
+          ? prev.wallets.map((w) =>
+              String(w.id) === sourceWalletId
+                ? { ...w, balance: Number(w.balance) + refundAmount }
+                : w,
+            )
+          : prev.wallets,
+
+      goals: prev.goals.filter((g) => String(g.id) !== targetId),
     }));
   }
 
@@ -370,6 +429,7 @@ export function FinanceProvider({ children }) {
     setBudget,
     addGoal,
     contributeGoal,
+    completeGoal,
     removeGoal,
   };
 

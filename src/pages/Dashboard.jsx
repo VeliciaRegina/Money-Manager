@@ -311,6 +311,7 @@ export default function Dashboard() {
       <section className="panel">
         <TransactionForm
           wallets={finance.wallets}
+          activeMonth={finance.activeMonth}
           onSubmit={finance.addTransaction}
         />
       </section>

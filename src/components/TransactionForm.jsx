@@ -1,24 +1,48 @@
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, Plus } from "lucide-react";
-
 import { expenseCategories, incomeCategories } from "../data/initialData";
 
-export default function TransactionForm({ wallets, onSubmit }) {
+function getDefaultDate(activeMonth) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!activeMonth) return today;
+  return today.startsWith(activeMonth) ? today : `${activeMonth}-01`;
+}
+
+export default function TransactionForm({ wallets, activeMonth, onSubmit }) {
   const [type, setType] = useState("expense");
+  const [error, setError] = useState("");
 
   const [form, setForm] = useState({
     title: "",
     amount: "",
     category: "Makan & Minum",
-    walletId: wallets[0]?.id || "",
-    date: new Date().toISOString().slice(0, 10),
+    walletId: String(wallets[0]?.id || ""),
+    date: getDefaultDate(activeMonth),
   });
+
+  // Sinkronkan tanggal form setiap kali bulan aktif berubah (misal setelah Tutup Buku)
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      date: getDefaultDate(activeMonth),
+    }));
+  }, [activeMonth]);
+
+  // Pastikan walletId selalu valid jika daftar dompet berubah
+  useEffect(() => {
+    if (
+      wallets.length &&
+      !wallets.some((w) => String(w.id) === String(form.walletId))
+    ) {
+      setForm((prev) => ({ ...prev, walletId: String(wallets[0].id) }));
+    }
+  }, [wallets, form.walletId]);
 
   const categories = type === "expense" ? expenseCategories : incomeCategories;
 
   function changeType(next) {
     setType(next);
+    setError("");
 
     setForm((prev) => ({
       ...prev,
@@ -28,6 +52,7 @@ export default function TransactionForm({ wallets, onSubmit }) {
 
   function submit(e) {
     e.preventDefault();
+    setError("");
 
     if (
       !form.title.trim() ||
@@ -35,21 +60,28 @@ export default function TransactionForm({ wallets, onSubmit }) {
       Number(form.amount) <= 0 ||
       !form.walletId
     ) {
+      setError("Lengkapi nama transaksi, nominal, dan pilihan dompet.");
       return;
     }
 
-    const success = onSubmit({
+    const result = onSubmit({
       ...form,
       type,
       amount: Number(form.amount),
     });
 
-    if (success) {
+    const isSuccess = typeof result === "object" ? result.ok : Boolean(result);
+
+    if (isSuccess) {
       setForm((prev) => ({
         ...prev,
         title: "",
         amount: "",
       }));
+    } else {
+      setError(
+        result?.message || "Gagal menyimpan transaksi. Periksa saldo dompet.",
+      );
     }
   }
 
@@ -142,7 +174,8 @@ export default function TransactionForm({ wallets, onSubmit }) {
           >
             {wallets.map((wallet) => (
               <option key={wallet.id} value={wallet.id}>
-                {wallet.name}
+                {wallet.name} (Rp{" "}
+                {Number(wallet.balance).toLocaleString("id-ID")})
               </option>
             ))}
           </select>
@@ -164,6 +197,8 @@ export default function TransactionForm({ wallets, onSubmit }) {
           />
         </label>
       </div>
+
+      {error && <p className="form-error">{error}</p>}
 
       <button className="btn btn-primary submit-btn" type="submit">
         <Plus size={17} />

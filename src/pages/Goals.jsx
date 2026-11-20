@@ -1,6 +1,13 @@
 import { useState } from "react";
 
-import { Plus, Target, Trash2, PiggyBank, ShieldCheck } from "lucide-react";
+import {
+  Plus,
+  Target,
+  Trash2,
+  PiggyBank,
+  ShieldCheck,
+  CheckCircle2,
+} from "lucide-react";
 
 import { useFinance } from "../context/FinanceContext";
 
@@ -188,71 +195,112 @@ export default function Goals() {
       </div>
 
       <div className="goals-grid">
-        {f.goals.map((g) => (
-          <article className="goal-card" key={g.id}>
-            <div className="goal-top">
-              <div className="goal-icon">
-                <Target />
+        {f.goals.map((g) => {
+          const isReached = Number(g.saved) >= Number(g.target);
+
+          return (
+            <article className="goal-card" key={g.id}>
+              <div className="goal-top">
+                <div className="goal-icon">
+                  <Target />
+                </div>
+
+                <button
+                  className="icon-button subtle"
+                  onClick={() => f.removeGoal(g.id)}
+                  title={
+                    g.completed
+                      ? "Hapus arsip target (dana sudah terpakai)"
+                      : "Hapus target & kembalikan dana ke dompet"
+                  }
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
 
-              <button
-                className="icon-button subtle"
-                onClick={() => f.removeGoal(g.id)}
-                title="Hapus target"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+              <h3>{g.name}</h3>
 
-            <h3>{g.name}</h3>
+              <p className="muted small">
+                Target {money(g.target)} {g.deadline && `· ${g.deadline}`}
+              </p>
 
-            <p className="muted small">
-              Target {money(g.target)} {g.deadline && `· ${g.deadline}`}
-            </p>
+              <div className="goal-progress">
+                <strong>{money(g.saved)}</strong>
 
-            <div className="goal-progress">
-              <strong>{money(g.saved)}</strong>
+                <span>{Math.round((g.saved / g.target) * 100)}%</span>
+              </div>
 
-              <span>{Math.round((g.saved / g.target) * 100)}%</span>
-            </div>
+              <ProgressBar value={g.saved} max={g.target} />
 
-            <ProgressBar value={g.saved} max={g.target} />
+              <small className="muted">
+                {g.completed
+                  ? "Target telah selesai & dana sudah digunakan."
+                  : isReached
+                    ? "Dana sudah terkumpul penuh! Klik Complete untuk menyelesaikan."
+                    : `Kurang ${money(Math.max(0, g.target - g.saved))} lagi`}
+              </small>
 
-            <small className="muted">
-              Kurang {money(Math.max(0, g.target - g.saved))} lagi
-            </small>
+              <div className="contribute-box">
+                {g.completed ? (
+                  <button
+                    type="button"
+                    className="btn btn-light full-btn"
+                    disabled
+                  >
+                    <CheckCircle2 size={16} />
+                    Completed (Tercapai)
+                  </button>
+                ) : isReached ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary full-btn"
+                    onClick={() => {
+                      f.completeGoal(g.id);
+                      setNotice(
+                        `Selamat! Target "${g.name}" selesai. Dana tidak akan dikembalikan ke dompet saat kartu dihapus.`,
+                      );
+                    }}
+                  >
+                    <CheckCircle2 size={16} />
+                    Complete Target
+                  </button>
+                ) : (
+                  <>
+                    <label className="field">
+                      <span>
+                        Alokasikan dari{" "}
+                        {f.wallets.find(
+                          (w) => String(w.id) === String(g.walletId),
+                        )?.name || "dompet"}
+                      </span>
 
-            <div className="contribute-box">
-              <label className="field">
-                <span>
-                  Alokasikan dari{" "}
-                  {f.wallets.find((w) => w.id === g.walletId)?.name || "dompet"}
-                </span>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Nominal (Rp)"
+                        value={contributions[g.id] || ""}
+                        onChange={(e) =>
+                          setContributions((prev) => ({
+                            ...prev,
+                            [g.id]: e.target.value,
+                          }))
+                        }
+                      />
+                    </label>
 
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="Nominal (Rp)"
-                  value={contributions[g.id] || ""}
-                  onChange={(e) =>
-                    setContributions((prev) => ({
-                      ...prev,
-                      [g.id]: e.target.value,
-                    }))
-                  }
-                />
-              </label>
-
-              <button
-                className="btn btn-dark full-btn"
-                onClick={() => addFunds(g.id)}
-              >
-                <PiggyBank size={16} />
-                Tambah tabungan
-              </button>
-            </div>
-          </article>
-        ))}
+                    <button
+                      className="btn btn-dark full-btn"
+                      onClick={() => addFunds(g.id)}
+                    >
+                      <PiggyBank size={16} />
+                      Tambah tabungan
+                    </button>
+                  </>
+                )}
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       {/* TARGET BARU */}
